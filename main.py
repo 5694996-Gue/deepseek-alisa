@@ -17,6 +17,7 @@ async def main(request: Request):
         headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
         json={
             "model": "deepseek-chat",
+            "max_tokens": 150,
             "messages": [{"role": "user", "content": user_text}],
         }
     )
