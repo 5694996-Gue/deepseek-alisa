@@ -10,7 +10,10 @@ app = FastAPI()
 
 # --- 1. Настройка Базы Данных ---
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
-engine = create_async_engine(DATABASE_URL, echo=False)
+# Очищаем URL от sslmode, так как asyncpg его не понимает
+if "?sslmode=require" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("?sslmode=require", "")
+engine = create_async_engine(DATABASE_URL, echo=False, connect_args={"ssl": "require"})
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 
