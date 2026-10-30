@@ -9,11 +9,13 @@ from datetime import datetime
 app = FastAPI()
 
 # --- 1. Настройка Базы Данных ---
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
-# Очищаем URL от sslmode, так как asyncpg его не понимает
-if "?sslmode=require" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("?sslmode=require", "")
-engine = create_async_engine(DATABASE_URL, echo=False, connect_args={"ssl": "require"})
+from sqlalchemy.engine.url import make_url
+
+db_url_str = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
+db_url = make_url(db_url_str)
+# Полностью удаляем все параметры из URL (там может быть sslmode и другие)
+db_url = db_url.set(query={})
+engine = create_async_engine(db_url, echo=False, connect_args={"ssl": "require"})
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 
