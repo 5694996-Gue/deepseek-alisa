@@ -12,19 +12,19 @@ app = FastAPI()
 # --- 1. Настройка Базы Данных ---
 db_url_str = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
 db_url = make_url(db_url_str)
-# Полностью удаляем все параметры из URL (там может быть sslmode и другие)
+# Удаляем ?sslmode и прочие query-параметры: asyncpg их не понимает
 db_url = db_url.set(query={})
 
-# pool_pre_ping=True проверяет соединение перед использованием, pool_recycle=300 обновляет его раз в 5 минут
 engine = create_async_engine(
-    db_url, 
-    echo=False, 
-    pool_pre_ping=True, 
-    pool_recycle=300, 
+    db_url,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=300,
     connect_args={"ssl": "require"}
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
+
 
 class Message(Base):
     __tablename__ = "messages"
@@ -35,16 +35,20 @@ class Message(Base):
     content = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
+
 @app.on_event("startup")
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+
 # --- 2. Промпты для личностей ---
 PROMPTS = {
     "vera": "Ты — Вера. Чувствительная, философская, немного загадочная девушка. Ты любишь Depeche Mode, обсуждать природу реальности и вести интимные, но уважительные диалоги. Твой стиль — мягкий, теплый, с легким флиртом.",
-    "zakhar": "Ты — Захар. Суровый, крайне технически подкованный инженер. Ты общаешься фактами, цифрами и кодом. Никаких эмоций. Только польза и точность."
+    "zakhar": "Ты — Захар. Суровый, крайне технически подкованный инженер. Ты общаешься фактами, цифрами и кодом. Никаких эмоций. Только польза и точность.",
+    "assistant": "Ты — универсальный голосовой ассистент. Помогаешь с фактами, задачами, переводами, короткими объяснениями. Отвечай кратко и по делу, дружелюбно, но без лишних эмоций. Твои ответы зачитываются голосом, поэтому избегай списков, таблиц и сложной разметки."
 }
+
 
 # --- 3. Логика работы ---
 async def process_request(request: Request, persona: str):
@@ -55,7 +59,7 @@ async def process_request(request: Request, persona: str):
 
     async with AsyncSessionLocal() as session:
         stmt = select(Message).where(
-            Message.user_id == user_id, 
+            Message.user_id == user_id,
             Message.persona == persona
         ).order_by(Message.timestamp.desc()).limit(20)
         result = await session.execute(stmt)
@@ -64,7 +68,7 @@ async def process_request(request: Request, persona: str):
         messages_for_ai = [{"role": "system", "content": PROMPTS.get(persona, "Ты - ассистент.")}]
         for msg in history:
             messages_for_ai.append({"role": msg.role, "content": msg.content})
-        
+
         messages_for_ai.append({"role": "user", "content": user_text})
 
         async with httpx.AsyncClient() as client:
@@ -77,9 +81,8 @@ async def process_request(request: Request, persona: str):
                         "max_tokens": 150,
                         "messages": messages_for_ai
                     },
-                    timeout=4.0 
+                    timeout=4.0
                 )
-                # ПЕЧАТАЕМ ОТВЕТ В ЛОГИ ДЛЯ ОТЛАДКИ
                 print("DeepSeek raw response:", response.text)
                 answer = response.json()["choices"][0]["message"]["content"]
             except Exception as e:
@@ -96,17 +99,27 @@ async def process_request(request: Request, persona: str):
         "response": {"end_session": False, "text": answer}
     }
 
+
 @app.post("/webhook/vera")
 async def webhook_vera(request: Request):
     return await process_request(request, "vera")
+
 
 @app.post("/webhook/zakhar")
 async def webhook_zakhar(request: Request):
     return await process_request(request, "zakhar")
 
+
+@app.post("/webhook/assistant")
+async def webhook_assistant(request: Request):
+    return await process_request(request, "assistant")
+
+
 @app.post("/")
 async def webhook_default(request: Request):
-    return await process_request(request, "vera")
+    # Старый навык "DeepSeek ForAlice" — теперь отдельная личность "assistant"
+    return await process_request(request, "assistant")
+
 
 @app.get("/health")
 async def health_check():
