@@ -107,3 +107,7 @@ async def webhook_zakhar(request: Request):
 @app.post("/")
 async def webhook_default(request: Request):
     return await process_request(request, "vera")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
