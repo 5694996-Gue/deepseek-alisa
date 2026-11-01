@@ -125,7 +125,7 @@ async def process_request(request: Request, persona: str):
                         "max_tokens": 90,
                         "messages": messages_for_ai
                     },
-                    timeout=4.0
+                    timeout=2.5
                 )
                 print("DeepSeek raw response:", response.text)
                 answer = response.json()["choices"][0]["message"]["content"]
