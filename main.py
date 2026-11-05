@@ -11,18 +11,24 @@ from sqlalchemy.engine.url import make_url
 app = FastAPI()
 
 # --- 1. Настройка Базы Данных ---
-db_url_str = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
+db_url_str = os.getenv("DATABASE_URL", "")
+
+# Автоматическая страховка: если забыли поменять префикс, меняем его на лету
+if db_url_str.startswith("postgresql://"):
+    db_url_str = db_url_str.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 db_url = make_url(db_url_str)
-# Удаляем ?sslmode и прочие query-параметры: asyncpg их не понимает
+# Удаляем query-параметры (например, ?sslmode=require), которые могут ломать asyncpg
 db_url = db_url.set(query={})
 
 engine = create_async_engine(
     db_url,
     echo=False,
     pool_pre_ping=True,
-    pool_recycle=300,
-    connect_args={"ssl": "require"}
+    pool_recycle=300
+    # Убрал connect_args={"ssl": "require"}, так как Render использует внутреннюю сеть без SSL
 )
+
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 
@@ -86,11 +92,9 @@ def trim_for_voice(text: str, limit: int = 280) -> str:
     if len(text) <= limit:
         return text
     cut = text[:limit]
-    # ищем последний конец предложения
     m = re.search(r"[.!?…](?=[^.!?…]*$)", cut)
     if m:
         return cut[:m.end()].strip()
-    # иначе — обрезаем по последнему пробелу
     return cut.rsplit(" ", 1)[0].strip() + "…"
 
 
@@ -102,10 +106,12 @@ async def process_request(request: Request, persona: str):
     api_key = os.getenv("DEEPSEEK_API_KEY")
 
     async with AsyncSessionLocal() as session:
+        # Берем последние 30 сообщений вместо 20
         stmt = select(Message).where(
             Message.user_id == user_id,
             Message.persona == persona
-        ).order_by(Message.timestamp.desc()).limit(20)
+        ).order_by(Message.timestamp.desc()).limit(30)
+        
         result = await session.execute(stmt)
         history = list(reversed(result.scalars().all()))
 
@@ -123,9 +129,11 @@ async def process_request(request: Request, persona: str):
                     json={
                         "model": "deepseek-chat",
                         "max_tokens": 90,
+                        "temperature": 1.25,       # Повышаем креативность
+                        "presence_penalty": 0.5,   # Запрещаем повторяться
                         "messages": messages_for_ai
                     },
-                    timeout=2.5
+                    timeout=3.5 # Даем чуть больше времени на раздумья
                 )
                 print("DeepSeek raw response:", response.text)
                 answer = response.json()["choices"][0]["message"]["content"]
@@ -163,7 +171,6 @@ async def webhook_assistant(request: Request):
 
 @app.post("/")
 async def webhook_default(request: Request):
-    # Старый навык "DeepSeek ForAlice" — теперь отдельная личность "assistant"
     return await process_request(request, "assistant")
 
 
